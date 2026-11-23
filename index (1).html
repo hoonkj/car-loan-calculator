@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="차량 가격, 선수금, 금리와 할부 기간을 입력해 자동차 월 납입금과 총이자를 비교하세요.">
+<title>자동차 할부 계산기 | 50대 생활비 연구소</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#edf3f1;color:#142d29;font:16px/1.6 system-ui,sans-serif}
+main{width:min(1040px,100% - 32px);margin:36px auto}
+header{padding:32px;background:#123c34;color:#fff;border-radius:20px;margin-bottom:20px}
+header p{margin:0;color:#c9e4da}
+h1{font-size:clamp(27px,5vw,46px);line-height:1.2;margin:8px 0 12px}
+h2{font-size:21px;margin:0 0 16px}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.card{background:white;border:1px solid #d5e3de;border-radius:18px;padding:24px}
+.fields,.stats{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+label{display:block;font-weight:650}
+input{display:block;width:100%;font:inherit;border:1px solid #809c94;border-radius:9px;padding:10px;margin-top:5px;color:inherit;background:#fff}
+button{font:inherit;font-weight:700;border:0;border-radius:9px;background:#12604c;color:white;padding:11px 18px;cursor:pointer;margin-top:16px;width:100%}
+:focus-visible{outline:3px solid #ad5900;outline-offset:3px}
+.hero{background:#dff3e9;padding:16px;border-radius:12px;margin-bottom:14px}
+.hero strong{display:block;font-size:clamp(25px,4vw,36px);line-height:1.3}
+.stats div{padding:10px;background:#f2f6f4;border-radius:8px}
+.stats strong{display:block;overflow-wrap:anywhere}
+small,.note{color:#425b55}
+.note{font-size:14px;margin-bottom:0}
+#error{color:#a12424;margin-bottom:0}
+#error:empty{display:none}
+.compare{margin-top:20px}
+.scroll{overflow:auto}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:10px;text-align:right;border-bottom:1px solid #dce7e2}
+th:first-child,td:first-child{text-align:left}
+tr.selected{background:#e5f4ec;font-weight:bold}
+footer{text-align:center;color:#425b55;margin:20px 0}
+@media(max-width:680px){main{margin:16px auto}.layout{grid-template-columns:1fr}.card,header{padding:18px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p>50대 생활비 연구소</p>
+<h1>자동차 할부 계산기</h1>
+<p>차량 가격과 할부 조건을 입력해 월 납입금과 총이자를 비교해 보세요.</p>
+</header>
+<div class="layout">
+<section class="card">
+<h2>할부 조건</h2>
+<form id="loan-form">
+<div class="fields">
+<label>차량 가격 (원)<input id="price" inputmode="numeric" value="30,000,000" required></label>
+<label>선수금 (원)<input id="down" inputmode="numeric" value="5,000,000" required></label>
+<label>연 금리 (%)<input id="annual" type="number" inputmode="decimal" min="0" max="100" step="any" value="5.5" required></label>
+<label>할부 기간 (개월)<input id="months" type="number" inputmode="numeric" min="1" max="120" step="1" value="60" required></label>
+</div>
+<button type="submit">할부금 계산하기</button>
+<p id="error" role="alert"></p>
+</form>
+<p class="note">금액은 원 단위입니다. 선수금이 없으면 0을 입력하세요.</p>
+</section>
+<section class="card" aria-live="polite">
+<h2>예상 납입액</h2>
+<div id="results" hidden>
+<div class="hero">월 납입금<strong id="monthly"></strong></div>
+<div class="stats">
+<div>할부 원금<strong id="principal"></strong></div>
+<div>총이자<strong id="interest"></strong></div>
+<div>할부 총납입액<strong id="total"></strong></div>
+<div>선수금 포함 총액<strong id="with-down"></strong></div>
+</div>
+</div>
+<p id="empty" hidden>입력값을 확인한 뒤 다시 계산해 주세요.</p>
+<p class="note">고정금리·원리금균등상환 기준 예상액입니다. 취득세·보험료·수수료는 제외하며, 실제 청구액은 납부일과 금융사 산정 방식에 따라 달라질 수 있습니다.</p>
+</section>
+</div>
+<section class="card compare" id="comparison" hidden>
+<h2>할부 기간별 비교</h2>
+<p class="note">같은 선수금과 금리를 적용해 비교합니다.</p>
+<div class="scroll" tabindex="0" role="region" aria-label="할부 기간별 비교표">
+<table>
+<thead><tr><th scope="col">기간</th><th scope="col">월 납입금</th><th scope="col">총이자</th><th scope="col">할부 총납입액</th></tr></thead>
+<tbody id="comparison-rows"></tbody>
+</table>
+</div>
+</section>
+<noscript><p>계산하려면 브라우저에서 자바스크립트를 활성화해 주세요.</p></noscript>
+<footer>50대 생활비 연구소</footer>
+</main>
+<script>
+'use strict';
+
+const get = (id) => document.getElementById(id);
+const form = get('loan-form');
+const number = new Intl.NumberFormat('ko-KR', {maximumFractionDigits: 0});
+const won = (value) => number.format(Math.round(value)) + '원';
+
+function readWon(value) {
+  const trimmed = value.trim();
+  if (!/^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)$/.test(trimmed)) return NaN;
+  return Number(trimmed.replaceAll(',', ''));
+}
+
+function calculate(principal, annual, months) {
+  const rate = annual / 1200;
+  if (!rate || rate * months < Number.EPSILON) {
+    return {monthly: principal / months, total: principal, interest: 0};
+  }
+  const monthly = principal * (rate / -Math.expm1(-months * Math.log1p(rate)));
+  const total = Math.max(principal, monthly * months);
+  return {monthly, total, interest: total - principal};
+}
+
+function showError(message) {
+  get('error').textContent = message;
+  get('results').hidden = Boolean(message);
+  get('empty').hidden = !message;
+  get('comparison').hidden = Boolean(message);
+}
+
+function update() {
+  const price = readWon(get('price').value);
+  const down = readWon(get('down').value);
+  if (!Number.isSafeInteger(price) || price < 1 || price > 100000000000) {
+    showError('차량 가격은 1원부터 1,000억 원까지 입력해 주세요.');
+    return;
+  }
+  if (!Number.isSafeInteger(down) || down > price) {
+    showError('선수금은 0원부터 차량 가격까지 입력해 주세요.');
+    return;
+  }
+
+  get('price').value = number.format(price);
+  get('down').value = number.format(down);
+  const annual = get('annual').valueAsNumber;
+  const months = get('months').valueAsNumber;
+  const principal = price - down;
+  const result = calculate(principal, annual, months);
+  get('monthly').textContent = won(result.monthly);
+  get('principal').textContent = won(principal);
+  get('interest').textContent = won(result.interest);
+  get('total').textContent = won(result.total);
+  get('with-down').textContent = won(result.total + down);
+
+  const rows = [...new Set([36, 48, 60, 72, months])].sort((a, b) => a - b).map((term) => {
+    const estimate = calculate(principal, annual, term);
+    const row = document.createElement('tr');
+    row.classList.toggle('selected', term === months);
+    row.insertCell().textContent = term + '개월' + (term === months ? ' (선택)' : '');
+    row.insertCell().textContent = won(estimate.monthly);
+    row.insertCell().textContent = won(estimate.interest);
+    row.insertCell().textContent = won(estimate.total);
+    return row;
+  });
+  get('comparison-rows').replaceChildren(...rows);
+  showError('');
+}
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  update();
+});
+
+form.addEventListener('invalid', () => {
+  showError('입력 범위를 확인해 주세요. 연 금리 0~100%, 기간 1~120개월입니다.');
+}, true);
+
+update();
+</script>
+</body>
+</html>
